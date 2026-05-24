@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { activeTab, viewMode, ZOOM_PRESETS, DEFAULT_ZOOM, searchBarOpen, commandPaletteOpen } from '$lib/stores';
+  import { activeTab, viewMode, ZOOM_PRESETS, DEFAULT_ZOOM, searchBarOpen, commandPaletteOpen, tabs, activeTabId } from '$lib/stores';
   import ToolbarButton from './ToolbarButton.svelte';
   import type { ViewMode } from '$lib/types';
 
@@ -39,13 +39,13 @@
     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
   </ToolbarButton>
   <div class="w-px h-5 bg-zinc-700 mx-1"></div>
-  <ToolbarButton title="Página anterior" onclick={() => {}} disabled={!$activeTab}>
+  <ToolbarButton title="Página anterior" onclick={() => { if ($activeTab && $activeTab.currentPage > 0) activeTabId.update(id => { tabs.updateTab(id!, { currentPage: $activeTab.currentPage - 1}); return id; }); }} disabled={!$activeTab || $activeTab.currentPage === 0}>
     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
   </ToolbarButton>
-  <span class="text-xs text-zinc-400 min-w-[60px] text-center">
+  <span class="text-xs text-zinc-400 min-w-[60px] text-center font-mono">
     {#if $activeTab}{$activeTab.currentPage + 1} / {$activeTab.pageCount}{:else}– / –{/if}
   </span>
-  <ToolbarButton title="Próxima página" onclick={() => {}} disabled={!$activeTab}>
+  <ToolbarButton title="Próxima página" onclick={() => { if ($activeTab && $activeTab.currentPage < $activeTab.pageCount - 1) activeTabId.update(id => { tabs.updateTab(id!, { currentPage: $activeTab.currentPage + 1}); return id; }); }} disabled={!$activeTab || ($activeTab && $activeTab.currentPage === $activeTab.pageCount - 1)}>
     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
   </ToolbarButton>
   <div class="w-px h-5 bg-zinc-700 mx-1"></div>

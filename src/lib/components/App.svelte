@@ -225,6 +225,7 @@
 
   <CommandPalette {commands} />
   <SearchBar />
+  <GlobalSearch />
 
   <!-- Version Stamp (Padrão Indústria Brasileira) -->
   <div class="fixed bottom-1 right-2 text-[10px] text-zinc-700 select-none pointer-events-none z-50 font-mono">
