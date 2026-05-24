@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import type { OpenPdfResponse, RenderPageResponse, SearchResultDto } from './types';
+import type { OpenPdfResponse, RenderPageResponse, SearchResultDto, GlobalSearchResultDto } from './types';
 
 // Helper to detect if running inside Tauri Native or Web Browser
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -84,4 +84,20 @@ export async function searchInDoc(
     return [];
   }
   return await invoke<SearchResultDto[]>('search_in_doc', { pdfId, query, matchCase });
+}
+
+export async function indexFolder(dirPath: string): Promise<number> {
+  if (!isTauri) {
+    console.warn("Indexação local não suportada via Web. Baixe o aplicativo desktop.");
+    return 0;
+  }
+  return await invoke<number>('index_folder', { dirPath });
+}
+
+export async function globalSearch(query: string): Promise<GlobalSearchResultDto[]> {
+  if (!isTauri) {
+    console.warn("Busca global não suportada via Web. Baixe o aplicativo desktop.");
+    return [];
+  }
+  return await invoke<GlobalSearchResultDto[]>('global_search', { query });
 }

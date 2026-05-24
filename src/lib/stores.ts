@@ -60,6 +60,10 @@ export const searchResults = writable<SearchResultDto[]>([]);
 export const currentSearchIndex = writable<number>(0);
 export const isSearching = writable<boolean>(false);
 
+// ---- Global Search ----
+export const globalSearchOpen = writable<boolean>(false);
+export const isIndexing = writable<boolean>(false);
+
 // ---- Command Palette ----
 export const searchBarOpen = writable<boolean>(false);
 export const commandPaletteOpen = writable<boolean>(false);

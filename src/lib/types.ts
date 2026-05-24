@@ -36,6 +36,13 @@ export interface SearchResultDto {
   rects: PdfRectDto[];
 }
 
+export interface GlobalSearchResultDto {
+  title: string;
+  path: string;
+  snippet: string;
+  score: number;
+}
+
 /** A single open tab in the UI */
 export interface PdfTab {
   id: PdfId;

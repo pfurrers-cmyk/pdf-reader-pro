@@ -3,8 +3,14 @@ use parking_lot::Mutex;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+use tantivy::collector::TopDocs;
+use tantivy::query::QueryParser;
+use tantivy::schema::{Schema, STORED, TEXT, Value};
+use tantivy::{doc, Index, IndexReader, IndexWriter, TantivyDocument};
+use walkdir::WalkDir;
 
 // ============================================================================
 // TYPES
@@ -25,6 +31,15 @@ pub struct SearchResultDto {
     pub page_index: u32,
     pub match_text: String,
     pub rects: Vec<PdfRectDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalSearchResultDto {
+    pub title: String,
+    pub path: String,
+    pub snippet: String,
+    pub score: f32,
 }
 
 /// Unique identifier for an open PDF document
@@ -79,6 +94,8 @@ pub enum PdfError {
     InvalidPage(String),
     #[error("Erro de IO: {0}")]
     IoError(String),
+    #[error("Erro no motor de busca: {0}")]
+    SearchEngineError(String),
 }
 
 impl Serialize for PdfError {
@@ -98,8 +115,16 @@ impl Serialize for PdfError {
 static PDF_STORE: Lazy<Mutex<HashMap<String, PdfDocument>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Search Engine Globals
+struct SearchEngine {
+    index: Index,
+    reader: IndexReader,
+    schema: Schema,
+}
+
+static TANTIVY_ENGINE: Lazy<Mutex<Option<SearchEngine>>> = Lazy::new(|| Mutex::new(None));
+
 /// Initialize the Pdfium engine
-/// Tries to bind to pdfium.dll in the app directory first, then system library
 fn get_pdfium() -> Pdfium {
     match Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./")) {
         Ok(bindings) => Pdfium::new(bindings),
@@ -131,12 +156,159 @@ fn bitmap_to_base64_png(bitmap: &PdfBitmap) -> Result<String, PdfError> {
 }
 
 // ============================================================================
-// TAURI COMMANDS
+// TAURI COMMANDS: SEARCH ENGINE
+// ============================================================================
+
+/// Initialize or retrieve the Tantivy Search Engine in memory
+fn init_search_engine() -> Result<(), PdfError> {
+    let mut engine = TANTIVY_ENGINE.lock();
+    if engine.is_none() {
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("title", TEXT | STORED);
+        schema_builder.add_text_field("body", TEXT | STORED);
+        schema_builder.add_text_field("path", TEXT | STORED);
+        let schema = schema_builder.build();
+
+        let index = Index::create_in_ram(schema.clone());
+        let reader = index
+            .reader_builder()
+            .try_into()
+            .map_err(|e| PdfError::SearchEngineError(e.to_string()))?;
+
+        *engine = Some(SearchEngine {
+            index,
+            reader,
+            schema,
+        });
+        eprintln!("[PDF Reader Pro] Tantivy In-Memory Engine initialized");
+    }
+    Ok(())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn index_folder(dir_path: String) -> Result<usize, PdfError> {
+    init_search_engine()?;
+    
+    let result = tokio::task::spawn_blocking(move || {
+        let engine_guard = TANTIVY_ENGINE.lock();
+        let engine = engine_guard.as_ref().unwrap();
+        
+        let mut index_writer: IndexWriter = engine
+            .index
+            .writer(50_000_000)
+            .map_err(|e| PdfError::SearchEngineError(e.to_string()))?;
+
+        let title_field = engine.schema.get_field("title").unwrap();
+        let body_field = engine.schema.get_field("body").unwrap();
+        let path_field = engine.schema.get_field("path").unwrap();
+
+        let pdfium = get_pdfium();
+        let mut count = 0;
+
+        for entry in WalkDir::new(&dir_path).into_iter().filter_map(|e| e.ok()) {
+            if entry.path().extension().and_then(|e| e.to_str()) == Some("pdf") {
+                let file_path = entry.path().to_string_lossy().into_owned();
+                let file_name = entry.file_name().to_string_lossy().into_owned();
+                
+                // Read and extract text
+                if let Ok(bytes) = std::fs::read(entry.path()) {
+                    if let Ok(document) = pdfium.load_pdf_from_byte_slice(&bytes, None) {
+                        let mut full_text = String::new();
+                        for page in document.pages().iter() {
+                            if let Ok(text_page) = page.text() {
+                                full_text.push_str(&text_page.all());
+                                full_text.push(' ');
+                            }
+                        }
+
+                        if !full_text.trim().is_empty() {
+                            index_writer.add_document(doc!(
+                                title_field => file_name,
+                                body_field => full_text,
+                                path_field => file_path
+                            )).map_err(|e| PdfError::SearchEngineError(e.to_string()))?;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        index_writer.commit().map_err(|e| PdfError::SearchEngineError(e.to_string()))?;
+        Ok::<usize, PdfError>(count)
+    }).await.map_err(|e| PdfError::SearchEngineError(e.to_string()))??;
+
+    Ok(result)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn global_search(query: String) -> Result<Vec<GlobalSearchResultDto>, PdfError> {
+    init_search_engine()?;
+
+    let result = tokio::task::spawn_blocking(move || {
+        let engine_guard = TANTIVY_ENGINE.lock();
+        let engine = engine_guard.as_ref().unwrap();
+
+        let searcher = engine.reader.searcher();
+        let title_field = engine.schema.get_field("title").unwrap();
+        let body_field = engine.schema.get_field("body").unwrap();
+        let path_field = engine.schema.get_field("path").unwrap();
+
+        let query_parser = QueryParser::for_index(&engine.index, vec![title_field, body_field]);
+        
+        let parsed_query = match query_parser.parse_query(&query) {
+            Ok(q) => q,
+            Err(_) => return Ok(Vec::new()),
+        };
+
+        let top_docs = searcher
+            .search(&parsed_query, &TopDocs::with_limit(20).order_by_score())
+            .map_err(|e| PdfError::SearchEngineError(e.to_string()))?;
+
+        let mut results = Vec::new();
+        for (score, doc_address) in top_docs {
+            if let Ok(retrieved_doc) = searcher.doc::<TantivyDocument>(doc_address) {
+                let title = retrieved_doc.get_first(title_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                let path = retrieved_doc.get_first(path_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let body = retrieved_doc.get_first(body_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                // Simple snippet generation
+                let snippet = if body.len() > 150 {
+                    let mut s = String::from(&body[..150]);
+                    s.push_str("...");
+                    s
+                } else {
+                    body.to_string()
+                };
+
+                results.push(GlobalSearchResultDto {
+                    title,
+                    path,
+                    snippet,
+                    score,
+                });
+            }
+        }
+
+        Ok::<Vec<GlobalSearchResultDto>, PdfError>(results)
+    }).await.map_err(|e| PdfError::SearchEngineError(e.to_string()))??;
+
+    Ok(result)
+}
+
+// ============================================================================
+// TAURI COMMANDS: BASIC PDF
 // ============================================================================
 
 /// Open a PDF file, load it into memory, and render the first page
-/// JS calls: invoke('open_pdf', { path: '/path/to/file.pdf' })
-/// Tauri v2: camelCase JS args auto-convert to snake_case Rust params
 #[tauri::command]
 async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     eprintln!("[PDF Reader Pro] open_pdf called with path: {}", path);
@@ -156,7 +328,6 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "documento.pdf".to_string());
 
-    // Read file bytes in a blocking thread to not freeze the main thread
     let path_clone = path.clone();
     let bytes = tokio::task::spawn_blocking(move || {
         std::fs::read(&path_clone).map_err(|e| PdfError::IoError(e.to_string()))
@@ -164,10 +335,7 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     .await
     .map_err(|e| PdfError::IoError(e.to_string()))??;
 
-    // Clone bytes for the blocking render task
     let bytes_for_render = bytes.clone();
-
-    // Render first page in a blocking thread (heavy CPU work)
     let render_result = tokio::task::spawn_blocking(move || {
         let pdfium = get_pdfium();
         let document = pdfium
@@ -175,8 +343,6 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
             .map_err(|e| PdfError::LoadError(e.to_string()))?;
 
         let page_count = document.pages().len() as u32;
-
-        // Get first page
         let first_page = document
             .pages()
             .get(0u16)
@@ -185,7 +351,6 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
         let page_width = first_page.width().value as f32;
         let page_height = first_page.height().value as f32;
 
-        // Render first page with a reasonable default width
         let render_config = PdfRenderConfig::new()
             .set_target_width(1200)
             .set_maximum_height(2000);
@@ -205,7 +370,6 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     eprintln!("[PDF Reader Pro] Rendered first page: {}x{}, {} pages, image {} bytes", 
         page_width, page_height, page_count, first_page_image.len());
 
-    // Generate unique ID and store document
     let pdf_id = PdfId::new();
     let id_str = pdf_id.0.clone();
 
@@ -231,9 +395,6 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     })
 }
 
-/// Render a specific page of an open PDF at the given zoom level
-/// JS calls: invoke('render_page', { pdfId, pageNum, zoom })
-/// Tauri v2: camelCase JS "pdfId" → snake_case Rust "pdf_id"
 #[tauri::command(rename_all = "snake_case")]
 async fn render_page(
     pdf_id: String,
@@ -241,7 +402,6 @@ async fn render_page(
     zoom: f32,
 ) -> Result<RenderPageResponse, PdfError> {
     eprintln!("[PDF Reader Pro] render_page called: pdf_id={}, page={}, zoom={}", pdf_id, page_num, zoom);
-    // Get document bytes from store
     let bytes = {
         let store = PDF_STORE.lock();
         match store.get(&pdf_id) {
@@ -250,7 +410,6 @@ async fn render_page(
         }
     };
 
-    // Render in blocking thread
     let result = tokio::task::spawn_blocking(move || {
         let pdfium = get_pdfium();
         let document = pdfium
@@ -271,7 +430,6 @@ async fn render_page(
             .get(page_num as u16)
             .map_err(|e| PdfError::InvalidPage(e.to_string()))?;
 
-        // Calculate render dimensions based on zoom
         let base_width: i32 = 800;
         let target_width = (base_width as f32 * zoom) as i32;
         let max_height = (target_width as f32 * 2.0) as i32;
@@ -286,7 +444,6 @@ async fn render_page(
 
         let width = bitmap.width() as u32;
         let height = bitmap.height() as u32;
-
         let base64_image = bitmap_to_base64_png(&bitmap)?;
 
         Ok::<RenderPageResponse, PdfError>(RenderPageResponse {
@@ -302,7 +459,6 @@ async fn render_page(
     Ok(result)
 }
 
-/// Get the total number of pages for an open PDF
 #[tauri::command(rename_all = "snake_case")]
 async fn get_page_count(pdf_id: String) -> Result<u32, PdfError> {
     let store = PDF_STORE.lock();
@@ -312,7 +468,6 @@ async fn get_page_count(pdf_id: String) -> Result<u32, PdfError> {
     }
 }
 
-/// Close a PDF document and free its memory
 #[tauri::command(rename_all = "snake_case")]
 async fn close_pdf(pdf_id: String) -> Result<(), PdfError> {
     let mut store = PDF_STORE.lock();
@@ -322,7 +477,6 @@ async fn close_pdf(pdf_id: String) -> Result<(), PdfError> {
     Ok(())
 }
 
-/// Get page dimensions for a specific page
 #[tauri::command(rename_all = "snake_case")]
 async fn get_page_dimensions(pdf_id: String, page_num: u32) -> Result<(f32, f32), PdfError> {
     let bytes = {
@@ -386,11 +540,12 @@ async fn search_in_doc(
                 let options = PdfSearchOptions::new().match_case(match_case);
                 if let Ok(search) = text_page.search(&query, &options) {
                     for segments in search.iter(PdfSearchDirection::SearchForward) {
-                        let match_text = segments.text();
+                        let mut match_text = String::new();
                         let mut rects = Vec::new();
                         
                         for i in 0..segments.len() {
-                            if let Ok(segment) = segments.get(i as u32) {
+                            if let Ok(segment) = segments.get((i as u32).try_into().unwrap()) {
+                                match_text.push_str(&segment.text());
                                 let bounds = segment.bounds();
                                 rects.push(PdfRectDto {
                                     left: bounds.left().value as f32,
@@ -434,6 +589,8 @@ pub fn run() {
             close_pdf,
             get_page_dimensions,
             search_in_doc,
+            index_folder,
+            global_search,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar PDF Reader Pro");
