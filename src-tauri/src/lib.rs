@@ -29,6 +29,7 @@ struct PdfDocument {
 
 /// Response returned when opening a PDF
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OpenPdfResponse {
     pdf_id: String,
     file_name: String,
@@ -40,6 +41,7 @@ pub struct OpenPdfResponse {
 
 /// Response returned when rendering a page
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RenderPageResponse {
     image: String, // base64 encoded PNG
     width: u32,
@@ -86,7 +88,7 @@ fn get_pdfium() -> Pdfium {
 
 /// Helper: render a PdfBitmap to base64 PNG
 fn bitmap_to_base64_png(bitmap: &PdfBitmap) -> Result<String, PdfError> {
-    let image = bitmap.as_image(); // Returns DynamicImage directly in pdfium-render 0.8
+    let image = bitmap.as_image(); // pdfium-render 0.8 returns DynamicImage directly
     let rgb_image = image.into_rgb8();
     let mut png_bytes: Vec<u8> = Vec::new();
     rgb_image
@@ -103,6 +105,8 @@ fn bitmap_to_base64_png(bitmap: &PdfBitmap) -> Result<String, PdfError> {
 // ============================================================================
 
 /// Open a PDF file, load it into memory, and render the first page
+/// JS calls: invoke('open_pdf', { path: '/path/to/file.pdf' })
+/// Tauri v2: camelCase JS args auto-convert to snake_case Rust params
 #[tauri::command]
 async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     let file_path = PathBuf::from(&path);
@@ -120,8 +124,9 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
         .unwrap_or_else(|| "documento.pdf".to_string());
 
     // Read file bytes in a blocking thread to not freeze the main thread
+    let path_clone = path.clone();
     let bytes = tokio::task::spawn_blocking(move || {
-        std::fs::read(&path).map_err(|e| PdfError::IoError(e.to_string()))
+        std::fs::read(&path_clone).map_err(|e| PdfError::IoError(e.to_string()))
     })
     .await
     .map_err(|e| PdfError::IoError(e.to_string()))??;
@@ -192,7 +197,9 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
 }
 
 /// Render a specific page of an open PDF at the given zoom level
-#[tauri::command]
+/// JS calls: invoke('render_page', { pdfId, pageNum, zoom })
+/// Tauri v2: camelCase JS "pdfId" → snake_case Rust "pdf_id"
+#[tauri::command(rename_all = "snake_case")]
 async fn render_page(
     pdf_id: String,
     page_num: u32,
@@ -260,7 +267,7 @@ async fn render_page(
 }
 
 /// Get the total number of pages for an open PDF
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn get_page_count(pdf_id: String) -> Result<u32, PdfError> {
     let store = PDF_STORE.lock();
     match store.get(&pdf_id) {
@@ -270,7 +277,7 @@ async fn get_page_count(pdf_id: String) -> Result<u32, PdfError> {
 }
 
 /// Close a PDF document and free its memory
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn close_pdf(pdf_id: String) -> Result<(), PdfError> {
     let mut store = PDF_STORE.lock();
     store
@@ -280,7 +287,7 @@ async fn close_pdf(pdf_id: String) -> Result<(), PdfError> {
 }
 
 /// Get page dimensions for a specific page
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn get_page_dimensions(pdf_id: String, page_num: u32) -> Result<(f32, f32), PdfError> {
     let bytes = {
         let store = PDF_STORE.lock();
