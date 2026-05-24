@@ -19,6 +19,7 @@
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import SearchBar from '$lib/components/SearchBar.svelte';
+  import GlobalSearch from '$lib/components/GlobalSearch.svelte';
 
   // ---- Version Stamp (Padrão Indústria Brasileira) ----
   const APP_VERSION = '0.1.0';
@@ -41,7 +42,7 @@
     { id: 'view-two', label: 'Duas páginas', category: 'visualização', action: () => {} },
     { id: 'toggle-sidebar', label: 'Alternar painel lateral', category: 'visualização', action: () => $sidebarOpen = !$sidebarOpen },
     { id: 'search', label: 'Buscar no documento', shortcut: 'Ctrl+F', category: 'busca', action: () => searchBarOpen.set(true) },
-    { id: 'global-search', label: 'Busca global (índice)', shortcut: 'Ctrl+Shift+F', category: 'busca', action: () => {} },
+    { id: 'global-search', label: 'Busca global (índice)', shortcut: 'Ctrl+Shift+F', category: 'busca', action: () => globalSearchOpen.set(true) },
   ];
 
   // ---- File Operations ----
@@ -174,6 +175,9 @@
     } else if (ctrl && event.key === '0') {
       event.preventDefault();
       changeZoom(1.0);
+    } else if (ctrl && event.shiftKey && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      globalSearchOpen.set(true);
     } else if (ctrl && event.key === 'f') {
       event.preventDefault();
       searchBarOpen.set(true);
