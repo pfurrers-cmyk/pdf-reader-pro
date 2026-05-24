@@ -5,22 +5,22 @@
 /** Unique identifier for an open PDF document */
 export type PdfId = string;
 
-/** Response from opening a PDF */
+/** Response from opening a PDF (matches Rust serde camelCase output) */
 export interface OpenPdfResponse {
-  pdf_id: PdfId;
-  file_name: string;
-  page_count: number;
-  first_page_image: string; // base64 PNG
-  page_width: number;
-  page_height: number;
+  pdfId: PdfId;
+  fileName: string;
+  pageCount: number;
+  firstPageImage: string; // base64 PNG
+  pageWidth: number;
+  pageHeight: number;
 }
 
-/** Response from rendering a page */
+/** Response from rendering a page (matches Rust serde camelCase output) */
 export interface RenderPageResponse {
   image: string; // base64 PNG
   width: number;
   height: number;
-  page_index: number;
+  pageIndex: number;
 }
 
 /** A single open tab in the UI */

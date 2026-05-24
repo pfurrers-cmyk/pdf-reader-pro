@@ -15,6 +15,7 @@
     "@tauri-apps/plugin-store": "^2",
     "bits-ui": "^2",
     "clsx": "^2",
+    "pdfjs-dist": "^5.7.284",
     "tailwind-merge": "^3",
     "tailwind-variants": "^1"
   },
@@ -23,11 +24,12 @@
     "@sveltejs/kit": "^2",
     "@sveltejs/vite-plugin-svelte": "^5",
     "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2",
+    "@types/pdfjs-dist": "^2.10.377",
     "svelte": "^5",
     "svelte-check": "^4",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vite": "^6",
-    "@tauri-apps/cli": "^2"
+    "vite": "^6"
   }
 }

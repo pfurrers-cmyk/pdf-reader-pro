@@ -81,9 +81,22 @@ impl Serialize for PdfError {
 static PDF_STORE: Lazy<Mutex<HashMap<String, PdfDocument>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-/// Initialize the Pdfium engine (uses system bindings or bundled)
+/// Initialize the Pdfium engine
+/// Tries to bind to pdfium.dll in the app directory first, then system library
 fn get_pdfium() -> Pdfium {
-    Pdfium::default()
+    match Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./")) {
+        Ok(bindings) => Pdfium::new(bindings),
+        Err(_) => {
+            eprintln!("[PDF Reader Pro] WARNING: pdfium.dll not found in current dir, trying system library...");
+            match Pdfium::bind_to_system_library() {
+                Ok(bindings) => Pdfium::new(bindings),
+                Err(e) => {
+                    eprintln!("[PDF Reader Pro] FATAL: Could not bind to any PDFium library: {:?}", e);
+                    panic!("Could not bind to PDFium library. Ensure pdfium.dll is next to the executable.");
+                }
+            }
+        }
+    }
 }
 
 /// Helper: render a PdfBitmap to base64 PNG
@@ -109,14 +122,17 @@ fn bitmap_to_base64_png(bitmap: &PdfBitmap) -> Result<String, PdfError> {
 /// Tauri v2: camelCase JS args auto-convert to snake_case Rust params
 #[tauri::command]
 async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
+    eprintln!("[PDF Reader Pro] open_pdf called with path: {}", path);
     let file_path = PathBuf::from(&path);
 
     if !file_path.exists() {
+        eprintln!("[PDF Reader Pro] File does NOT exist: {}", path);
         return Err(PdfError::IoError(format!(
             "Arquivo não existe: {}",
             path
         )));
     }
+    eprintln!("[PDF Reader Pro] File exists, reading bytes...");
 
     let file_name = file_path
         .file_name()
@@ -169,6 +185,8 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     .map_err(|e| PdfError::RenderError(e.to_string()))??;
 
     let (page_count, page_width, page_height, first_page_image) = render_result;
+    eprintln!("[PDF Reader Pro] Rendered first page: {}x{}, {} pages, image {} bytes", 
+        page_width, page_height, page_count, first_page_image.len());
 
     // Generate unique ID and store document
     let pdf_id = PdfId::new();
@@ -205,6 +223,7 @@ async fn render_page(
     page_num: u32,
     zoom: f32,
 ) -> Result<RenderPageResponse, PdfError> {
+    eprintln!("[PDF Reader Pro] render_page called: pdf_id={}, page={}, zoom={}", pdf_id, page_num, zoom);
     // Get document bytes from store
     let bytes = {
         let store = PDF_STORE.lock();

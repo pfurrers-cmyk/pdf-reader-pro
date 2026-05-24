@@ -21,7 +21,7 @@
 
   // ---- Version Stamp (Padrão Indústria Brasileira) ----
   const APP_VERSION = '0.1.0';
-  const BUILD_DATE = '24/05/2026 16:33:00 BRT';
+  const BUILD_DATE = '24/05/2026 17:19:00 BRT';
 
   // ---- State ----
   let currentZoom = $state(1.0);
@@ -44,45 +44,72 @@
   ];
 
   // ---- File Operations ----
+  let fileInputEl: HTMLInputElement | undefined = $state();
+
   async function handleOpenFile() {
+    if (isTauri) {
+      try {
+        const filePath = await openFileDialog();
+        if (!filePath) return; // User cancelled
+        await loadPdf(filePath);
+      } catch (e) {
+        console.error('Erro ao abrir arquivo nativo:', e);
+      }
+    } else {
+      // Web fallback
+      fileInputEl?.click();
+    }
+  }
+
+  async function handleWebFileSelect(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0];
+    if (!file) return;
+
     try {
-      const filePath = await openFileDialog();
-      if (!filePath) return; // User cancelled
-      await loadPdf(filePath);
+      console.log('[PDF Reader Pro] Abrindo PDF WebFallback:', file.name);
+      const result = await openPdf('', file);
+      finishPdfLoad(result);
     } catch (e) {
-      console.error('Erro ao abrir arquivo:', e);
+      console.error('[PDF Reader Pro] Erro ao carregar PDF WebFallback:', e);
+      alert("Erro ao carregar PDF na versão Web: " + e);
+    } finally {
+      target.value = ''; // Reset input
     }
   }
 
   async function loadPdf(path: string) {
     try {
-      console.log('[PDF Reader Pro] Abrindo PDF:', path);
+      console.log('[PDF Reader Pro] Abrindo PDF nativo:', path);
       const result = await openPdf(path);
-      console.log('[PDF Reader Pro] PDF carregado:', result.pdf_id, result.page_count, 'páginas');
-
-      // Store first page image separately (Map doesn't serialize in Svelte stores)
-      firstPageImages.set(result.pdf_id, result.first_page_image);
-      firstPageImages = new Map(firstPageImages);
-
-      const newTab: PdfTab = {
-        id: result.pdf_id,
-        fileName: result.file_name,
-        pageCount: result.page_count,
-        pageWidth: result.page_width,
-        pageHeight: result.page_height,
-        currentPage: 0,
-        zoom: DEFAULT_ZOOM,
-        scrollPosition: 0,
-        renderedPages: new Map(),
-        isLoading: false,
-      };
-
-      tabs.addTab(newTab);
-      activeTabId.set(result.pdf_id);
-      currentZoom = DEFAULT_ZOOM;
+      finishPdfLoad(result);
     } catch (e) {
-      console.error('[PDF Reader Pro] Erro ao carregar PDF:', e);
+      console.error('[PDF Reader Pro] Erro ao carregar PDF nativo:', e);
     }
+  }
+
+  function finishPdfLoad(result: any) {
+    console.log('[PDF Reader Pro] PDF carregado:', result.pdfId, result.pageCount, 'páginas');
+
+    firstPageImages.set(result.pdfId, result.firstPageImage);
+    firstPageImages = new Map(firstPageImages);
+
+    const newTab: PdfTab = {
+      id: result.pdfId,
+      fileName: result.fileName,
+      pageCount: result.pageCount,
+      pageWidth: result.pageWidth,
+      pageHeight: result.pageHeight,
+      currentPage: 0,
+      zoom: DEFAULT_ZOOM,
+      scrollPosition: 0,
+      renderedPages: new Map(),
+      isLoading: false,
+    };
+
+    tabs.addTab(newTab);
+    activeTabId.set(result.pdfId);
+    currentZoom = DEFAULT_ZOOM;
   }
 
   function handleCloseCurrent() {
