@@ -10,6 +10,23 @@ use uuid::Uuid;
 // TYPES
 // ============================================================================
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfRectDto {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultDto {
+    pub page_index: u32,
+    pub match_text: String,
+    pub rects: Vec<PdfRectDto>,
+}
+
 /// Unique identifier for an open PDF document
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct PdfId(String);
@@ -335,6 +352,72 @@ async fn get_page_dimensions(pdf_id: String, page_num: u32) -> Result<(f32, f32)
     Ok(result)
 }
 
+/// Search text inside an open PDF document
+#[tauri::command(rename_all = "snake_case")]
+async fn search_in_doc(
+    pdf_id: String,
+    query: String,
+    match_case: bool,
+) -> Result<Vec<SearchResultDto>, PdfError> {
+    eprintln!("[PDF Reader Pro] search_in_doc called for: {}, query: {}", pdf_id, query);
+    
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let bytes = {
+        let store = PDF_STORE.lock();
+        match store.get(&pdf_id) {
+            Some(doc) => doc.bytes.clone(),
+            None => return Err(PdfError::DocumentNotFound(pdf_id)),
+        }
+    };
+
+    let result = tokio::task::spawn_blocking(move || {
+        let pdfium = get_pdfium();
+        let document = pdfium
+            .load_pdf_from_byte_slice(&bytes, None)
+            .map_err(|e| PdfError::LoadError(e.to_string()))?;
+
+        let mut all_results = Vec::new();
+
+        for (page_index, page) in document.pages().iter().enumerate() {
+            if let Ok(text_page) = page.text() {
+                let options = PdfSearchOptions::new().match_case(match_case);
+                if let Ok(search) = text_page.search(&query, &options) {
+                    for segments in search.iter(PdfSearchDirection::SearchForward) {
+                        let match_text = segments.text();
+                        let mut rects = Vec::new();
+                        
+                        for i in 0..segments.len() {
+                            if let Ok(segment) = segments.get(i as u32) {
+                                let bounds = segment.bounds();
+                                rects.push(PdfRectDto {
+                                    left: bounds.left().value as f32,
+                                    top: bounds.top().value as f32,
+                                    right: bounds.right().value as f32,
+                                    bottom: bounds.bottom().value as f32,
+                                });
+                            }
+                        }
+                        
+                        all_results.push(SearchResultDto {
+                            page_index: page_index as u32,
+                            match_text,
+                            rects,
+                        });
+                    }
+                }
+            }
+        }
+        Ok::<Vec<SearchResultDto>, PdfError>(all_results)
+    })
+    .await
+    .map_err(|e| PdfError::RenderError(e.to_string()))??;
+
+    Ok(result)
+}
+
 // ============================================================================
 // APPLICATION ENTRY POINT
 // ============================================================================
@@ -350,6 +433,7 @@ pub fn run() {
             get_page_count,
             close_pdf,
             get_page_dimensions,
+            search_in_doc,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar PDF Reader Pro");

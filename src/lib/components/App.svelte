@@ -10,14 +10,14 @@
     sidebarOpen,
     DEFAULT_ZOOM,
   } from '$lib/stores';
-  import { openPdf, openFileDialog, isTauri } from '$lib/api';
-  import type { PdfTab } from '$lib/types';
+  import { openPdf, openFileDialog, isTauri, searchInDoc } from '$lib/api';
+  import type { PdfTab, SearchResultDto } from '$lib/types';
 
   import TabBar from '$lib/components/TabBar.svelte';
   import Toolbar from '$lib/components/Toolbar.svelte';
   import PdfViewer from '$lib/components/PdfViewer.svelte';
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
-  import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import SearchBar from '$lib/components/SearchBar.svelte';
 
   // ---- Version Stamp (Padrão Indústria Brasileira) ----
   const APP_VERSION = '0.1.0';
@@ -27,7 +27,7 @@
   let currentZoom = $state(1.0);
   let firstPageImages = $state<Map<string, string>>(new Map());
 
-  // ---- Commands for the Command Palette ----
+  // ---- Command Palette ----
   const commands = [
     { id: 'open', label: 'Abrir PDF', shortcut: 'Ctrl+O', category: 'arquivo', action: handleOpenFile },
     { id: 'close', label: 'Fechar aba atual', shortcut: 'Ctrl+W', category: 'arquivo', action: handleCloseCurrent },
@@ -39,7 +39,7 @@
     { id: 'view-single', label: 'Página única', category: 'visualização', action: () => {} },
     { id: 'view-two', label: 'Duas páginas', category: 'visualização', action: () => {} },
     { id: 'toggle-sidebar', label: 'Alternar painel lateral', category: 'visualização', action: () => $sidebarOpen = !$sidebarOpen },
-    { id: 'search', label: 'Buscar no documento', shortcut: 'Ctrl+F', category: 'busca', action: () => {} },
+    { id: 'search', label: 'Buscar no documento', shortcut: 'Ctrl+F', category: 'busca', action: () => searchBarOpen.set(true) },
     { id: 'global-search', label: 'Busca global (índice)', shortcut: 'Ctrl+Shift+F', category: 'busca', action: () => {} },
   ];
 
@@ -173,6 +173,9 @@
     } else if (ctrl && event.key === '0') {
       event.preventDefault();
       changeZoom(1.0);
+    } else if (ctrl && event.key === 'f') {
+      event.preventDefault();
+      searchBarOpen.set(true);
     } else if (event.key === 'Escape') {
       commandPaletteOpen.set(false);
     }

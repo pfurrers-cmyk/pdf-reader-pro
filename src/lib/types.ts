@@ -23,6 +23,19 @@ export interface RenderPageResponse {
   pageIndex: number;
 }
 
+export interface PdfRectDto {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export interface SearchResultDto {
+  pageIndex: number;
+  matchText: string;
+  rects: PdfRectDto[];
+}
+
 /** A single open tab in the UI */
 export interface PdfTab {
   id: PdfId;

@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { writable, derived, get } from 'svelte/store';
-import type { PdfTab, ViewMode } from '$lib/types';
+import type { PdfTab, ViewMode, SearchResultDto } from '$lib/types';
 import type { PdfId } from '$lib/types';
 
 // ---- Active Tabs ----
@@ -56,8 +56,12 @@ export const sidebarOpen = writable<boolean>(false);
 
 // ---- Search Query ----
 export const searchQuery = writable<string>('');
+export const searchResults = writable<SearchResultDto[]>([]);
+export const currentSearchIndex = writable<number>(0);
+export const isSearching = writable<boolean>(false);
 
 // ---- Command Palette ----
+export const searchBarOpen = writable<boolean>(false);
 export const commandPaletteOpen = writable<boolean>(false);
 
 // ---- Loading State ----

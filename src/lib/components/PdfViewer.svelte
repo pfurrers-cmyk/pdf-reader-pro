@@ -2,7 +2,7 @@
   // ========================================================================
   // PDF VIEWER — Renderiza páginas do PDF com rolagem suave e zoom
   // ========================================================================
-  import { activeTab, viewMode } from '$lib/stores';
+  import { activeTab, viewMode, searchResults, currentSearchIndex } from '$lib/stores';
   import { renderPage } from '$lib/api';
   import type { PdfId } from '$lib/types';
 
@@ -104,6 +104,10 @@
     return '';
   }
 
+  function getPageScale(pageWidth: number, currentZoom: number) {
+    return (800 * currentZoom) / pageWidth;
+  }
+
   const pageRange = $derived(Array.from({ length: pageCount }, (_, i) => i));
 </script>
 
@@ -152,6 +156,25 @@
         <div class="absolute bottom-1 right-1 bg-zinc-900/80 text-zinc-500 text-[10px] px-1.5 py-0.5 rounded">
           {pageIndex + 1}
         </div>
+
+        <!-- Search Highlights -->
+        {#if $searchResults.length > 0 && $activeTab}
+          {@const scale = getPageScale($activeTab.pageWidth, zoom)}
+          {#each $searchResults.filter(r => r.pageIndex === pageIndex) as result, rIdx}
+            {@const isCurrent = $searchResults[$currentSearchIndex] === result}
+            {#each result.rects as rect}
+              <div
+                class="absolute mix-blend-multiply border {isCurrent ? 'bg-orange-500/50 border-orange-600' : 'bg-yellow-400/40 border-yellow-500/50'}"
+                style="
+                  left: {rect.left * scale}px; 
+                  top: {($activeTab.pageHeight - rect.top) * scale}px; 
+                  width: {Math.max((rect.right - rect.left) * scale, 4)}px; 
+                  height: {Math.max((rect.top - rect.bottom) * scale, 4)}px;
+                "
+              ></div>
+            {/each}
+          {/each}
+        {/if}
       </div>
     {/each}
   </div>

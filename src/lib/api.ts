@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import type { OpenPdfResponse, RenderPageResponse } from './types';
+import type { OpenPdfResponse, RenderPageResponse, SearchResultDto } from './types';
 
 // Helper to detect if running inside Tauri Native or Web Browser
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -73,12 +73,15 @@ export async function closePdf(pdfId: string): Promise<void> {
   return await invoke<void>('close_pdf', { pdfId });
 }
 
-export async function getPageDimensions(
+export async function searchInDoc(
   pdfId: string,
-  pageNum: number
-): Promise<[number, number]> {
+  query: string,
+  matchCase: boolean = false
+): Promise<SearchResultDto[]> {
   if (!isTauri && pdfId.startsWith('web-')) {
-    return [800, 1100]; // Basic fallback for web
+    // Basic web fallback for search (returns empty for now until PDF.js text layer is implemented)
+    console.warn("Search not fully implemented in web fallback yet.");
+    return [];
   }
-  return await invoke<[number, number]>('get_page_dimensions', { pdfId, pageNum });
+  return await invoke<SearchResultDto[]>('search_in_doc', { pdfId, query, matchCase });
 }
