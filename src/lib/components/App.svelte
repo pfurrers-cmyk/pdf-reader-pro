@@ -10,7 +10,7 @@
     sidebarOpen,
     DEFAULT_ZOOM,
   } from '$lib/stores';
-  import { openPdf, openFileDialog } from '$lib/api';
+  import { openPdf, openFileDialog, isTauri } from '$lib/api';
   import type { PdfTab } from '$lib/types';
 
   import TabBar from '$lib/components/TabBar.svelte';
@@ -221,4 +221,17 @@
   <div class="fixed bottom-1 right-2 text-[10px] text-zinc-700 select-none pointer-events-none z-50 font-mono">
     PDF Reader Pro v{APP_VERSION} — {BUILD_DATE}
   </div>
+
+  <!-- Hidden File Input for Web Fallback -->
+  {#if !isTauri}
+    <input 
+      type="file" 
+      accept=".pdf,application/pdf"
+      bind:this={fileInputEl} 
+      onchange={handleWebFileSelect}
+      class="hidden" 
+      aria-hidden="true" 
+      tabindex="-1"
+    />
+  {/if}
 </div>
