@@ -1,0 +1,1 @@
+const { spawnSync } = require('child_process'); spawnSync('npx', ['tauri', 'signer', 'generate', '-w', 'updater-keys'], { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, TAURI_PRIVATE_KEY_PASSWORD: '' } });

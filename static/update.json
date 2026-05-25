@@ -1,0 +1,11 @@
+{
+  "version": "0.1.1",
+  "notes": "Nova versao: Anotacoes, Busca Indexada, Auto-Update.",
+  "pub_date": "2026-05-25T14:19:32.911Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "",
+      "url": "https://github.com/pfurrers-cmyk/pdf-reader-pro/releases/download/v0.1.1/FurrerTech.PDF_0.1.1_x64-setup.exe"
+    }
+  }
+}

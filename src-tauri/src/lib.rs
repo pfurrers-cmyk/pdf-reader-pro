@@ -3,13 +3,13 @@ use parking_lot::Mutex;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 
-use tantivy::collector::TopDocs;
-use tantivy::query::QueryParser;
 use tantivy::schema::{Schema, STORED, TEXT, Value};
 use tantivy::{doc, Index, IndexReader, IndexWriter, TantivyDocument};
+use tantivy::collector::TopDocs;
+use tantivy::query::QueryParser;
 use walkdir::WalkDir;
 
 // ============================================================================
@@ -54,7 +54,7 @@ impl PdfId {
 
 /// Represents an open PDF document stored in memory
 struct PdfDocument {
-    _path: PathBuf,
+    path: PathBuf,
     bytes: Vec<u8>,
     page_count: u32,
 }
@@ -96,6 +96,8 @@ pub enum PdfError {
     IoError(String),
     #[error("Erro no motor de busca: {0}")]
     SearchEngineError(String),
+    #[error("Erro ao manipular anotações: {0}")]
+    AnnotationError(String),
 }
 
 impl Serialize for PdfError {
@@ -159,7 +161,6 @@ fn bitmap_to_base64_png(bitmap: &PdfBitmap) -> Result<String, PdfError> {
 // TAURI COMMANDS: SEARCH ENGINE
 // ============================================================================
 
-/// Initialize or retrieve the Tantivy Search Engine in memory
 fn init_search_engine() -> Result<(), PdfError> {
     let mut engine = TANTIVY_ENGINE.lock();
     if engine.is_none() {
@@ -210,7 +211,6 @@ async fn index_folder(dir_path: String) -> Result<usize, PdfError> {
                 let file_path = entry.path().to_string_lossy().into_owned();
                 let file_name = entry.file_name().to_string_lossy().into_owned();
                 
-                // Read and extract text
                 if let Ok(bytes) = std::fs::read(entry.path()) {
                     if let Ok(document) = pdfium.load_pdf_from_byte_slice(&bytes, None) {
                         let mut full_text = String::new();
@@ -280,7 +280,6 @@ async fn global_search(query: String) -> Result<Vec<GlobalSearchResultDto>, PdfE
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                // Simple snippet generation
                 let snippet = if body.len() > 150 {
                     let mut s = String::from(&body[..150]);
                     s.push_str("...");
@@ -308,20 +307,14 @@ async fn global_search(query: String) -> Result<Vec<GlobalSearchResultDto>, PdfE
 // TAURI COMMANDS: BASIC PDF
 // ============================================================================
 
-/// Open a PDF file, load it into memory, and render the first page
 #[tauri::command]
 async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     eprintln!("[PDF Reader Pro] open_pdf called with path: {}", path);
     let file_path = PathBuf::from(&path);
 
     if !file_path.exists() {
-        eprintln!("[PDF Reader Pro] File does NOT exist: {}", path);
-        return Err(PdfError::IoError(format!(
-            "Arquivo não existe: {}",
-            path
-        )));
+        return Err(PdfError::IoError(format!("Arquivo não existe: {}", path)));
     }
-    eprintln!("[PDF Reader Pro] File exists, reading bytes...");
 
     let file_name = file_path
         .file_name()
@@ -367,8 +360,6 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
     .map_err(|e| PdfError::RenderError(e.to_string()))??;
 
     let (page_count, page_width, page_height, first_page_image) = render_result;
-    eprintln!("[PDF Reader Pro] Rendered first page: {}x{}, {} pages, image {} bytes", 
-        page_width, page_height, page_count, first_page_image.len());
 
     let pdf_id = PdfId::new();
     let id_str = pdf_id.0.clone();
@@ -378,7 +369,7 @@ async fn open_pdf(path: String) -> Result<OpenPdfResponse, PdfError> {
         store.insert(
             id_str.clone(),
             PdfDocument {
-                _path: file_path,
+                path: file_path,
                 bytes,
                 page_count,
             },
@@ -401,7 +392,6 @@ async fn render_page(
     page_num: u32,
     zoom: f32,
 ) -> Result<RenderPageResponse, PdfError> {
-    eprintln!("[PDF Reader Pro] render_page called: pdf_id={}, page={}, zoom={}", pdf_id, page_num, zoom);
     let bytes = {
         let store = PDF_STORE.lock();
         match store.get(&pdf_id) {
@@ -419,9 +409,8 @@ async fn render_page(
         let page_count = document.pages().len() as u32;
         if page_num >= page_count {
             return Err(PdfError::InvalidPage(format!(
-                "Página {} não existe. Total: {}",
-                page_num + 1,
-                page_count
+                "Página {} não existe.",
+                page_num + 1
             )));
         }
 
@@ -434,6 +423,7 @@ async fn render_page(
         let target_width = (base_width as f32 * zoom) as i32;
         let max_height = (target_width as f32 * 2.0) as i32;
 
+        // Render including annotations (they are rendered by default in pdfium-render 0.8+)
         let render_config = PdfRenderConfig::new()
             .set_target_width(target_width)
             .set_maximum_height(max_height);
@@ -471,9 +461,7 @@ async fn get_page_count(pdf_id: String) -> Result<u32, PdfError> {
 #[tauri::command(rename_all = "snake_case")]
 async fn close_pdf(pdf_id: String) -> Result<(), PdfError> {
     let mut store = PDF_STORE.lock();
-    store
-        .remove(&pdf_id)
-        .ok_or_else(|| PdfError::DocumentNotFound(pdf_id.clone()))?;
+    store.remove(&pdf_id).ok_or_else(|| PdfError::DocumentNotFound(pdf_id))?;
     Ok(())
 }
 
@@ -506,15 +494,12 @@ async fn get_page_dimensions(pdf_id: String, page_num: u32) -> Result<(f32, f32)
     Ok(result)
 }
 
-/// Search text inside an open PDF document
 #[tauri::command(rename_all = "snake_case")]
 async fn search_in_doc(
     pdf_id: String,
     query: String,
     match_case: bool,
 ) -> Result<Vec<SearchResultDto>, PdfError> {
-    eprintln!("[PDF Reader Pro] search_in_doc called for: {}, query: {}", pdf_id, query);
-    
     if query.is_empty() {
         return Ok(Vec::new());
     }
@@ -574,6 +559,179 @@ async fn search_in_doc(
 }
 
 // ============================================================================
+// TAURI COMMANDS: ANNOTATIONS & SAVE (PHASE 3)
+// ============================================================================
+
+/// Adds a sticky note (Text Annotation) at a specific coordinate
+#[tauri::command(rename_all = "snake_case")]
+async fn add_text_annotation(
+    pdf_id: String,
+    page_num: u32,
+    x: f32,
+    y: f32,
+    content: String,
+    r: u8,
+    g: u8,
+    b: u8,
+) -> Result<(), PdfError> {
+    let mut bytes = {
+        let store = PDF_STORE.lock();
+        match store.get(&pdf_id) {
+            Some(doc) => doc.bytes.clone(),
+            None => return Err(PdfError::DocumentNotFound(pdf_id.clone())),
+        }
+    };
+
+    let new_bytes = tokio::task::spawn_blocking(move || {
+        let pdfium = get_pdfium();
+        let mut document = pdfium
+            .load_pdf_from_byte_slice(&bytes, None)
+            .map_err(|e| PdfError::LoadError(e.to_string()))?;
+
+        {
+            let mut page = document
+                .pages_mut().get(page_num as u16)
+                .map_err(|e| PdfError::InvalidPage(e.to_string()))?;
+                
+            let mut annotation = page.annotations_mut()
+                .create_text_annotation("")
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+
+            let width = 24.0;
+            let height = 24.0;
+            
+            let points = PdfPoints::new(x);
+            let y_points = PdfPoints::new(y);
+            
+            annotation.set_position(points, y_points)
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+                
+            annotation.set_width(PdfPoints::new(width))
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+                
+            annotation.set_height(PdfPoints::new(height))
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+
+            annotation.set_contents(&content)
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+                
+            let color = PdfColor::new(r, g, b, 255);
+            annotation.set_fill_color(color)
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+        }
+
+        // Save the mutated document back to bytes
+        document.save_to_bytes().map_err(|e| PdfError::AnnotationError(e.to_string()))
+    })
+    .await
+    .map_err(|e| PdfError::AnnotationError(e.to_string()))??;
+
+    // Update the byte store with the new version containing the annotation
+    let mut store = PDF_STORE.lock();
+    if let Some(doc) = store.get_mut(&pdf_id) {
+        doc.bytes = new_bytes;
+    }
+    
+    Ok(())
+}
+
+/// Adds a highlight over the specified coordinates (useful after selecting a rect area)
+#[tauri::command(rename_all = "snake_case")]
+async fn add_highlight_annotation(
+    pdf_id: String,
+    page_num: u32,
+    left: f32,
+    bottom: f32,
+    right: f32,
+    top: f32,
+    r: u8,
+    g: u8,
+    b: u8,
+) -> Result<(), PdfError> {
+    let mut bytes = {
+        let store = PDF_STORE.lock();
+        match store.get(&pdf_id) {
+            Some(doc) => doc.bytes.clone(),
+            None => return Err(PdfError::DocumentNotFound(pdf_id.clone())),
+        }
+    };
+
+    let new_bytes = tokio::task::spawn_blocking(move || {
+        let pdfium = get_pdfium();
+        let mut document = pdfium
+            .load_pdf_from_byte_slice(&bytes, None)
+            .map_err(|e| PdfError::LoadError(e.to_string()))?;
+
+        {
+            let mut page = document
+                .pages_mut().get(page_num as u16)
+                .map_err(|e| PdfError::InvalidPage(e.to_string()))?;
+                
+            let mut annotation = page.annotations_mut()
+                .create_highlight_annotation()
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+
+            annotation.set_position(PdfPoints::new(left), PdfPoints::new(bottom))
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+                
+            annotation.set_width(PdfPoints::new(right - left))
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+                
+            annotation.set_height(PdfPoints::new(top - bottom))
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+
+            // Generate attachment points bounding box using PdfQuadPoints (4 corners of a quad)
+            let quad = PdfQuadPoints::new(
+                PdfPoints::new(left), PdfPoints::new(top),      // top-left (x1, y1)
+                PdfPoints::new(right), PdfPoints::new(top),     // top-right (x2, y2)
+                PdfPoints::new(left), PdfPoints::new(bottom),   // bottom-left (x3, y3)
+                PdfPoints::new(right), PdfPoints::new(bottom),  // bottom-right (x4, y4)
+            );
+            annotation.attachment_points_mut()
+                .create_attachment_point_at_end(quad)
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+
+            let color = PdfColor::new(r, g, b, 128); // 50% opacity
+            annotation.set_fill_color(color)
+                .map_err(|e| PdfError::AnnotationError(e.to_string()))?;
+        }
+
+        // Save the mutated document back to bytes
+        document.save_to_bytes().map_err(|e| PdfError::AnnotationError(e.to_string()))
+    })
+    .await
+    .map_err(|e| PdfError::AnnotationError(e.to_string()))??;
+
+    // Update the byte store
+    let mut store = PDF_STORE.lock();
+    if let Some(doc) = store.get_mut(&pdf_id) {
+        doc.bytes = new_bytes;
+    }
+    
+    Ok(())
+}
+
+/// Persists the currently mutated PDF Document bytes to the filesystem
+#[tauri::command(rename_all = "snake_case")]
+async fn save_pdf_to_disk(pdf_id: String) -> Result<(), PdfError> {
+    let (path, bytes) = {
+        let store = PDF_STORE.lock();
+        match store.get(&pdf_id) {
+            Some(doc) => (doc.path.clone(), doc.bytes.clone()),
+            None => return Err(PdfError::DocumentNotFound(pdf_id.clone())),
+        }
+    };
+
+    tokio::task::spawn_blocking(move || {
+        std::fs::write(&path, bytes).map_err(|e| PdfError::IoError(e.to_string()))
+    })
+    .await
+    .map_err(|e| PdfError::IoError(e.to_string()))??;
+
+    Ok(())
+}
+
+// ============================================================================
 // APPLICATION ENTRY POINT
 // ============================================================================
 
@@ -582,6 +740,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             open_pdf,
             render_page,
@@ -591,7 +751,11 @@ pub fn run() {
             search_in_doc,
             index_folder,
             global_search,
+            add_text_annotation,
+            add_highlight_annotation,
+            save_pdf_to_disk,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar PDF Reader Pro");
 }
+

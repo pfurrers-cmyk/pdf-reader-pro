@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/tauri-v2/main/tooling/cli/schema.json",
-  "productName": "PDF Reader Pro",
+  "productName": "FurrerTech PDF",
   "version": "0.1.0",
   "identifier": "com.pdfreaderpro.app",
   "build": {
@@ -25,6 +25,14 @@
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "vLhNZKWKC55lWgpg3xJvCqFbtvcIziR3vrLhlKSoXhY=",
+      "endpoints": [
+        "https://pdf-reader-pro-xi.vercel.app/update.json"
+      ]
     }
   },
   "bundle": {

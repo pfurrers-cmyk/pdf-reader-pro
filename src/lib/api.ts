@@ -94,10 +94,44 @@ export async function indexFolder(dirPath: string): Promise<number> {
   return await invoke<number>('index_folder', { dirPath });
 }
 
+export async function addHighlightAnnotation(
+  pdfId: string,
+  pageNum: number,
+  left: number,
+  bottom: number,
+  right: number,
+  top: number,
+  color: { r: number, g: number, b: number }
+): Promise<void> {
+  if (!isTauri) return;
+  return await invoke<void>('add_highlight_annotation', { 
+    pdfId, pageNum, left, bottom, right, top, ...color 
+  });
+}
+
+export async function addTextAnnotation(
+  pdfId: string,
+  pageNum: number,
+  x: number,
+  y: number,
+  content: string,
+  color: { r: number, g: number, b: number }
+): Promise<void> {
+  if (!isTauri) return;
+  return await invoke<void>('add_text_annotation', { 
+    pdfId, pageNum, x, y, content, ...color 
+  });
+}
+
 export async function globalSearch(query: string): Promise<GlobalSearchResultDto[]> {
   if (!isTauri) {
     console.warn("Busca global não suportada via Web. Baixe o aplicativo desktop.");
     return [];
   }
   return await invoke<GlobalSearchResultDto[]>('global_search', { query });
+}
+
+export async function savePdfToDisk(pdfId: string): Promise<void> {
+  if (!isTauri) return;
+  return await invoke<void>('save_pdf_to_disk', { pdfId });
 }

@@ -11,6 +11,8 @@
     DEFAULT_ZOOM,
   } from '$lib/stores';
   import { openPdf, openFileDialog, isTauri, searchInDoc } from '$lib/api';
+  import { checkForAppUpdates } from '$lib/updater';
+  import { savePdfToDisk } from '$lib/api';
   import type { PdfTab, SearchResultDto } from '$lib/types';
 
   import TabBar from '$lib/components/TabBar.svelte';
@@ -175,6 +177,9 @@
     } else if (ctrl && event.key === '0') {
       event.preventDefault();
       changeZoom(1.0);
+    } else if (ctrl && event.key === 's') {
+      event.preventDefault();
+      if ($activeTab) savePdfToDisk($activeTab.id);
     } else if (ctrl && event.shiftKey && event.key.toLowerCase() === 'f') {
       event.preventDefault();
       globalSearchOpen.set(true);
@@ -188,6 +193,7 @@
 
   $effect(() => {
     window.addEventListener('keydown', handleGlobalKeydown);
+    checkForAppUpdates();
     return () => window.removeEventListener('keydown', handleGlobalKeydown);
   });
 

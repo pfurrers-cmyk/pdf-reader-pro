@@ -1,10 +1,10 @@
-// ============================================================================
-// SVELTE STORES — Global State Management for PDF Reader Pro
-// ============================================================================
-
 import { writable, derived, get } from 'svelte/store';
 import type { PdfTab, ViewMode, SearchResultDto } from '$lib/types';
 import type { PdfId } from '$lib/types';
+
+// ============================================================================
+// SVELTE STORES — Global State Management for PDF Reader Pro
+// ============================================================================
 
 // ---- Active Tabs ----
 function createTabsStore() {
@@ -48,8 +48,10 @@ export const activeTab = derived(
   }
 );
 
-// ---- View Mode ----
+// ---- View / Tool Mode ----
 export const viewMode = writable<ViewMode>('continuous');
+export type ToolMode = 'hand' | 'highlight' | 'sticky_note';
+export const toolMode = writable<ToolMode>('hand');
 
 // ---- Sidebar Open ----
 export const sidebarOpen = writable<boolean>(false);
